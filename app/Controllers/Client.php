@@ -1,0 +1,539 @@
+<?php
+    
+    namespace App\Controllers;
+
+    use App\Models\ClientModel; /*
+        因為Model在app/Models/ClientModel.php，
+        而它的namespace是App\Models;
+        所以Controller要先告訴PHP：我要使用ClientModel
+    */
+
+    class Client extends BaseController
+    {
+        //顯示案主列表
+        public function index()
+        {
+            $clientModel = new ClientModel(); /*
+                建立一個ClientModel物件。
+                ClientModel->知道要操作clients資料表
+                前面ClientModel.php中寫protected $table = 'clients';
+                所以CI4知道ClientModel->clients
+            */
+
+            //取得網址中的route_no
+            $routeNo = $this->request->getGet('route_no'); //對應$routeNo = $_GET['route_no'];
+
+            //只查詢沒有被軟刪除的案主
+            $clientModel->where('d_date', null);
+
+            //如果有輸入路線，就加入路線條件
+            if ($routeNo !== null && $routeNo !== '') {
+                $clientModel->where('route_no', $routeNo);
+            }
+
+            //排序：先路線，再案主編號
+            $clientModel
+                ->where('d_date', null) //WHERE d_date IS NULL
+                ->orderBy('route_no', 'ASC') //ORDER BY route_no ASC
+                ->orderBy('s_num', 'ASC'); //如果上面的route_no相同再按照s_num排序
+
+            //查詢資料
+            $clients = $clientModel->findAll(); /*
+                findAll()意思是：把這個Model對應資料表的資料全部找出來
+                $clientModel -> findAll() -> SELECT... -> clients
+                CI4會幫你進行資料庫查詢，不需要自己寫SELECT * FROM clients
+            */
+
+            //傳給View
+            $data = [
+                'clients' => $clients
+            ];
+
+            return view('client/list', $data);
+        }
+
+        //顯示新增頁面
+        public function add()
+        {
+            return view('client/add');
+        }
+
+        //儲存新增資料
+        public function store()
+        {
+            /*
+            |--------------------------------------------------------------------------
+            | 檔案驗證規則
+            |--------------------------------------------------------------------------
+            */
+            $rules = [
+               'photo' => [
+                    'permit_empty',
+                    'is_image[photo]',
+                    'mime_in[photo,image/jpeg,image/png,image/webp]',
+                    'max_size[photo,5120]'
+                ],
+
+                'file' => [
+                    'permit_empty',
+                    'mime_in[file,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document]',
+                    'max_size[file,10240]'
+                ]
+            ];
+
+            /*
+            |--------------------------------------------------------------------------
+            | 錯誤訊息
+            |--------------------------------------------------------------------------
+            */
+
+            $messages = [
+                'photo' => [
+                    'is_image' => '照片必須是圖片格式。',
+                    'mime_in' => '照片只允許 JPG、JPEG、PNG、WEBP。',
+                    'max_size' => '照片大小不能超過 5 MB。'
+                ],
+
+                'file' => [
+                    'mime_in' => '文件只允許 PDF、DOC、DOCX。',
+                    'max_size' => '文件大小不能超過 10 MB。'
+                ]
+            ];
+
+            /*
+            |--------------------------------------------------------------------------
+            | 執行驗證
+            |--------------------------------------------------------------------------
+            */
+            if (!$this->validate($rules)) {
+                return redirect()
+                    ->back()
+                    ->withInput()
+                    ->with('errors', $this->validator->getErrors());
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 取得檔案
+            |--------------------------------------------------------------------------
+            */
+            $photo = $this->request->getFile('photo'); //對應name="photo"
+
+            $file = $this->request->getFile('file'); //對應name="file"
+
+            /*
+            |--------------------------------------------------------------------------
+            | 建立案主資料
+            |--------------------------------------------------------------------------
+            */
+            $data = [
+                'ct_name' => $this->request->getPost('ct_name'),
+                'ct_addr' => $this->request->getPost('ct_addr'),
+                'route_no' => $this->request->getPost('route_no'),
+                'meal_type' => $this->request->getPost('meal_type'),
+                'b_date' => date('Y-m-d H:i:s'),
+            ];
+
+            /*
+            |--------------------------------------------------------------------------
+            | 儲存照片
+            |--------------------------------------------------------------------------
+            */
+            //(有無收到檔案>檔案是否有效>是否沒被移動)
+            if ($photo && $photo->isValid() && !$photo->hasMoved()) { 
+                
+                $photoName = $photo->getRandomName(); // 產生隨機檔名>避免不同使用者上傳同名檔案
+
+                $photo->move(
+                    WRITEPATH . 'uploads/clients', //把照片移到uploads；WRITEPATH>C:\Users\User\xampp\htdocs\my-project\writable\
+                    $photoName
+                ); //放在writeable不是pubic，如果在後者，使用者可以直接透過網址存取檔案
+
+                $data['photo'] = $photoName; //最後把檔名存進資料庫
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 儲存文件
+            |--------------------------------------------------------------------------
+            */
+            if ($file && $file->isValid() && !$file->hasMoved()) {
+
+                $fileName = $file->getRandomName();
+
+                $file->move(
+                    WRITEPATH . 'uploads/clients',
+                    $fileName
+                );
+
+                $data['file'] = $fileName;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 寫入資料庫
+            |--------------------------------------------------------------------------
+            */
+            $clientModel = new ClientModel();
+
+            $clientModel->insert($data);
+
+            return redirect()->to('/clients');
+        }
+
+
+        //顯示修改頁面
+        public function edit($id)
+        {
+            $clientModel = new ClientModel();
+
+            $client = $clientModel->find($id);
+
+            $data = [
+                'client' => $client
+            ];
+
+            return view('client/edit', $data);
+        }
+
+        //儲存修改資料
+        public function update($id)
+        {
+            $clientModel = new ClientModel();
+
+            /*
+            |--------------------------------------------------------------------------
+            | 找出原本的案主
+            |--------------------------------------------------------------------------
+            */
+            $client = $clientModel->find($id);
+
+            if (!$client) {
+                return redirect()->to('/clients');
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 檔案驗證規則
+            |--------------------------------------------------------------------------
+            */
+            $rules = [
+                'photo' => [
+                    'permit_empty',
+                    'is_image[photo]',
+                    'mime_in[photo,image/jpeg,image/png,image/webp]',
+                    'max_size[photo,5120]'
+                ],
+
+                'file' => [
+                    'permit_empty',
+                    'mime_in[file,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document]',
+                    'max_size[file,10240]'
+                ]
+            ];
+
+            /*
+            |--------------------------------------------------------------------------
+            | 錯誤訊息
+            |--------------------------------------------------------------------------
+            */
+            $message = [
+                'photo' => [
+                    'is_image' => '照片必須是圖片格式',
+                    'mime_in' => '照片只允許JPG、JPEG、PNG、WEBP',
+                    'max_size' => '照片大小不能超過 5 MB'
+                ],
+
+                'file' => [
+                    'mime_in' => '文件只允許PDF、DOC、DOCX',
+                    'max_size' => '文件大小不能超過 10 MB'
+                ]
+            ];
+
+            /*
+            |--------------------------------------------------------------------------
+            | 執行驗證
+            |--------------------------------------------------------------------------
+            */
+            if (!$this->validate($rules, $message)) {
+                return redirect()
+                    ->back()
+                    ->withInput()
+                    ->with('errors', $this->validator->getErrors());
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 取得新檔案
+            |--------------------------------------------------------------------------
+            */
+            $photo = $this->request->getFile('photo');
+
+            $file = $this->request->getFile('file');
+
+            /*
+            |--------------------------------------------------------------------------
+            | 基本資料
+            |--------------------------------------------------------------------------
+            */
+            $data = [
+                'ct_name' => $this->request->getPost('ct_name'),
+                'ct_addr' => $this->request->getPost('ct_addr'),
+                'route_no' => $this->request->getPost('route_no'),
+                'meal_type' => $this->request->getPost('meal_type')
+            ]; //取得使用者修改後的資料
+
+            /*
+            |--------------------------------------------------------------------------
+            | 處理新照片
+            |--------------------------------------------------------------------------
+            */
+            if ($photo && $photo->isValid()) {
+                //刪除舊照片
+                if (!empty($client['photo'])) {
+                    $oldPhotoPath = WRITEPATH
+                        . 'uploads/clients/'
+                        .$client['photo'];
+
+                    if (is_file($oldPhotoPath)) {
+                        unlink($oldPhotoPath);
+                    }
+                }
+
+                // 產生新檔名
+                $photoName = $photo->getRandomName();
+
+                //儲存新照片
+                $photo->move(
+                    WRITEPATH . 'uploads/clients',
+                    $photoName 
+                );
+
+                //更新資料庫
+                $data['photo'] = $photoName;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 處理新文件
+            |--------------------------------------------------------------------------
+            */
+
+            if ($file && $file->isValid()) {
+
+                // 刪除舊文件
+                if (!empty($client['file'])) {
+
+                    $oldFilePath = WRITEPATH
+                        . 'uploads/clients/'
+                        . $client['file'];
+
+                    if (is_file($oldFilePath)) {
+                        unlink($oldFilePath);
+                    }
+                }
+
+                // 產生新檔名
+                $fileName = $file->getRandomName();
+
+                // 儲存新文件
+                $file->move(
+                    WRITEPATH . 'uploads/clients',
+                    $fileName
+                );
+
+                // 更新資料庫
+                $data['file'] = $fileName;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | 更新資料庫
+            |--------------------------------------------------------------------------
+            */
+
+            //真正執行UPDATE的地方
+            $clientModel->update($id, $data);
+
+            return redirect()->to('/clients');
+        }
+
+        //刪除目前照片
+        public function deletePhoto($id)
+        {
+            $clientModel = new ClientModel();
+
+            $client = $clientModel->find($id);
+
+            if (!$client) {
+                return redirect()->to('/clients');
+            }
+
+            //確認目前有照片
+            if (!empty($client['photo'])) {
+                $photoPath = WRITEPATH
+                    . 'uploads/clients/'
+                    . $client['photo'];
+
+                //刪除實體照片
+                if (is_file($photoPath)) {
+                    unlink($photoPath);
+                }
+
+                //清除資料庫中的照片檔名
+                $clientModel->update($id, [
+                    'photo' => null
+                ]);
+            }
+
+            return redirect()->to('/clients/edit/' . $id);
+        }
+
+        //刪除目前文件
+        public function deleteFile($id)
+        {
+            $clientModel = new ClientModel();
+
+            $client = $clientModel->find($id);
+
+            if (!$client) {
+                return redirect()->to('/clients');
+            }
+
+            //確認目前有文件
+            if (!empty($client['file'])) {
+                $filePath = WRITEPATH
+                    . 'uploads/clients/'
+                    . $client['file'];
+
+                //刪除實體文件
+                if (is_file($filePath)) {
+                    unlink($filePath);
+                }
+
+                // 清除資料庫中的文件檔名件檔名
+                $clientModel->update($id, [
+                    'file' => null
+                ]);
+            }
+
+            return redirect()->to('/clients/edit/' . $id);
+        }
+
+        //刪除資料
+        public function delete($id)
+        {
+            $clientModel = new ClientModel();
+
+            $data = [
+                'd_date' => date('Y-m-d H:i:s')
+            ]; //設定刪除時間
+
+            //更新指定案主
+            $clientModel->update($id, $data);
+
+            return redirect()->to('/clients');
+        }
+
+        //詳細資料
+        public function detail($id) 
+        {
+            $clientModel = new ClientModel();
+
+            $client = $clientModel->find($id);
+
+            //找不到案主
+            if (!$client) {
+                return redirect()->to('/clients');
+            }
+
+            $data = [
+                'client' => $client
+            ];
+
+            return view('client/detail', $data);
+        }
+
+        public function photo($id)
+        {
+            $clientModel = new ClientModel();
+
+            $client = $clientModel->find($id);
+
+            if (!$client || empty($client['photo'])) {
+                return $this->response->setStatusCode(404);
+            }
+
+            $filePath = WRITEPATH
+                . 'uploads/clients/'
+                . $client['photo'];
+
+            if (!is_file($filePath)) {
+                return $this->response->setStatusCode(404);
+            }
+
+            $mimeType = mime_content_type($filePath);
+
+            return $this->response
+                ->setHeader('Content-Type', $mimeType)
+                ->setBody(file_get_contents($filePath));
+        }
+
+        public function file($id)
+        {
+            $clientModel = new ClientModel();
+
+            $client = $clientModel->find($id);
+
+            if (!$client || empty($client['file'])) {
+                return $this->response->setStatusCode(404);
+            }
+
+            $filePath = WRITEPATH
+                . 'uploads/clients/'
+                . $client['file'];
+
+            if (!is_file($filePath)) {
+                return $this->response->setStatusCode(404);
+            }
+
+            return $this->response->download(
+                $filePath,
+                null
+            );
+        }
+
+        public function filePreview($id)
+        {
+            $clientModel =new ClientModel();
+
+            $client = $clientModel->find($id);
+
+            if (!$client || empty($client['file'])) {
+                return $this->response->setStatusCode(404);
+            }
+
+            $filePath = WRITEPATH
+                . 'uploads/clients/'
+                . $client['file'];
+            
+            if (!is_file($filePath)) {
+                return $this->response->setStatusCode(404);
+            }
+
+            $extension = strtolower(
+                pathinfo($client['file'], PATHINFO_EXTENSION)
+            );
+
+            if ($extension !== 'pdf') {
+                return $this->response->setStatusCode(400);
+            }
+
+            return $this->response
+                ->setHeader('Content-Type', 'application/pdf')
+                ->setHeader('Content-Disposition', 'inline') //不要強制下載，從瀏覽器直接顯示
+                ->setBody(file_get_contents($filePath));
+        }
+
+    }
+?>

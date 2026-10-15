@@ -1,0 +1,37 @@
+<?php
+
+use CodeIgniter\Router\RouteCollection;
+
+/** @var RouteCollection $routes */
+
+$routes->get('/clients', 'Client::index', ['filter' => 'auth']);
+
+$routes->get('/clients/add', 'Client::add', ['filter' => 'auth']);
+
+$routes->post('clients/store', 'Client::store', ['filter' => 'auth']);
+
+$routes->get('/clients/edit/(:num)', 'Client::edit/$1', ['filter' => 'auth']);
+
+$routes->post('/clients/update/(:num)', 'Client::update/$1', ['filter' => 'auth']);
+
+$routes->get('/clients/delete/(:num)', 'Client::delete/$1', ['filter' => 'auth']);
+
+$routes->get('/login', 'Auth::login');
+
+$routes->post('/login/check', 'Auth::check');
+
+$routes->get('/logout', 'Auth::logout');
+
+$routes->get('/', 'Auth::login');
+
+$routes->get('/clients/detail/(:num)', 'Client::detail/$1', ['filter' => 'auth']);
+
+$routes->get('/clients/photo/(:num)', 'Client::photo/$1', ['filter' => 'auth']);
+
+$routes->get('/clients/file/(:num)', 'Client::file/$1', ['filter' => 'auth']);
+
+$routes->get('/clients/file-preview/(:num)','Client::filePreview/$1', ['filter' => 'auth']);
+
+$routes->post('/clients/delete-photo/(:num)', 'Client::deletePhoto/$1', ['filter' => 'auth']);
+
+$routes->post('/clients/delete-file/(:num)', 'Client::deleteFile/$1', ['filter' => 'auth']);
